@@ -21,7 +21,7 @@ BASELINE_SUBSCRIPTION_RATE = 0.02         # 訂閱率（MAU中有多少比例付
 BASELINE_RPM = 64                         # 每千非訂閱用戶的廣告收入
 BASELINE_PERSONNEL_COST_LOW = 140000      # 前兩個月的人事成本（低月）
 BASELINE_PERSONNEL_COST_HIGH = 280000     # 後續月份的人事成本（高月）
-BASELINE_OPERATIONAL_COST = 50000         # 固定管銷費用（例如伺服器、店租等）
+BASELINE_OPERATIONAL_COST = 53968         # 固定管銷費用（例如伺服器、店租等）
 
 # 悲觀(Conservative)假設因子 (在樂觀基礎上降低)
 CONSERVATIVE_INITIAL_GROWTH_RATE = BASELINE_INITIAL_GROWTH_RATE * 0.7
