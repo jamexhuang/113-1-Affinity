@@ -1,5 +1,5 @@
 # ============================================
-# AFFINITY的財務狀況模擬 By 311057012 黃子峻
+# AFFINITY的財務狀況模擬 (凸性指數型下降從第3個月開始)
 # ============================================
 
 import matplotlib.pyplot as plt
@@ -13,23 +13,23 @@ import os
 MONTHS_TOTAL = 36
 
 # 樂觀(Baseline)假設因子
-BASELINE_INITIAL_GROWTH_RATE = 0.17       # 初期成長率（高）
+BASELINE_INITIAL_GROWTH_RATE = 0.34       # 初期成長率（高）
 BASELINE_FINAL_GROWTH_RATE = 0.03         # 終期成長率（低）
 BASELINE_MONTHLY_SUB_PRICE = 320          # 月訂閱費
 BASELINE_ANNUAL_SUB_PRICE = 3200          # 年訂閱費
 BASELINE_SUBSCRIPTION_RATE = 0.02         # 訂閱率（MAU中有多少比例付費訂閱）
-BASELINE_RPM = 64                         # 每千非訂閱用戶的廣告收入
+BASELINE_RPM = 65                        # 每千非訂閱用戶的廣告收入 (約2 USD)
 BASELINE_PERSONNEL_COST_LOW = 140000      # 前兩個月的人事成本（低月）
 BASELINE_PERSONNEL_COST_HIGH = 280000     # 後續月份的人事成本（高月）
 BASELINE_OPERATIONAL_COST = 53968         # 固定管銷費用（例如伺服器、店租等）
 
 # 悲觀(Conservative)假設因子 (在樂觀基礎上降低)
-CONSERVATIVE_INITIAL_GROWTH_RATE = BASELINE_INITIAL_GROWTH_RATE * 0.7
-CONSERVATIVE_FINAL_GROWTH_RATE = BASELINE_FINAL_GROWTH_RATE * 0.7
+CONSERVATIVE_INITIAL_GROWTH_RATE = BASELINE_INITIAL_GROWTH_RATE * 0.8
+CONSERVATIVE_FINAL_GROWTH_RATE = BASELINE_FINAL_GROWTH_RATE * 0.8
 CONSERVATIVE_MONTHLY_SUB_PRICE = BASELINE_MONTHLY_SUB_PRICE * 1
 CONSERVATIVE_ANNUAL_SUB_PRICE = BASELINE_ANNUAL_SUB_PRICE * 1
-CONSERVATIVE_SUBSCRIPTION_RATE = BASELINE_SUBSCRIPTION_RATE * 0.7
-CONSERVATIVE_RPM = BASELINE_RPM * 0.7
+CONSERVATIVE_SUBSCRIPTION_RATE = BASELINE_SUBSCRIPTION_RATE * 0.8
+CONSERVATIVE_RPM = BASELINE_RPM * 0.8
 # 人事成本與管銷費用在悲觀情境下不變
 CONSERVATIVE_PERSONNEL_COST_LOW = BASELINE_PERSONNEL_COST_LOW
 CONSERVATIVE_PERSONNEL_COST_HIGH = BASELINE_PERSONNEL_COST_HIGH
@@ -54,9 +54,12 @@ def save_individual_fig(fig, filename):
     plt.close(fig)  # 關閉圖表以節省記憶體
 
 def calculate_mau(months_total, initial_growth_rate, final_growth_rate):
-    mau_data = [0, 0]  # 前兩個月 MAU 為 0
+    mau_data = [0, 0]  # 前兩個月 MAU 為 0，第三個月(程式的month=2)開始有成長
     for month in range(2, months_total):
-        growth_rate = initial_growth_rate - (initial_growth_rate - final_growth_rate) * ((month - 2) / (months_total - 3))
+        # month=2 (第三個月) 時 ratio=0，growth_rate=initial_growth_rate
+        # month=months_total-1 時 ratio=1，growth_rate=final_growth_rate
+        ratio = (month - 2) / (months_total - 3)
+        growth_rate = initial_growth_rate * ((final_growth_rate / initial_growth_rate) ** (ratio**2))
         new_mau = (mau_data[-1] if month > 2 else 1000) * (1 + growth_rate)
         mau_data.append(new_mau)
     return mau_data
@@ -71,7 +74,7 @@ def calculate_revenues(mau_data, months_total, subscription_rate, monthly_subscr
         else:
             mau = mau_data[month]
             sub_revenue = mau * subscription_rate * (monthly_subscription_price + (annual_subscription_price / 12))
-            ads_revenue = mau * (1 - subscription_rate) * rpm
+            ads_revenue = mau * (1 - subscription_rate) * rpm / 1000
             total_revenue = sub_revenue + ads_revenue
             subscription_revenue.append(sub_revenue)
             ad_revenue.append(ads_revenue)
@@ -80,7 +83,6 @@ def calculate_revenues(mau_data, months_total, subscription_rate, monthly_subscr
 
 def calculate_cash_flow(monthly_revenue, months_total, personnel_cost_low, personnel_cost_high, operational_cost):
     personnel_costs = [personnel_cost_low if month < 2 else personnel_cost_high for month in range(months_total)]
-    # 新增 operational_cost，固定每月支出
     cash_flow = [monthly_revenue[month] - personnel_costs[month] - operational_cost for month in range(months_total)]
     cumulative_surplus = [sum(cash_flow[:month + 1]) for month in range(months_total)]
     breakeven_month = next((month + 1 for month in range(months_total) if cumulative_surplus[month] >= 0), None)
@@ -105,17 +107,21 @@ def annotate_breakeven(ax, breakeven_month, chart_type, breakeven_data):
         label = breakeven_data['label']
 
         y_min, y_max = ax.get_ylim()
-        offset = (y_max - y_min) * 0.05 if y_max != y_min else 10
+        offset = (y_max - y_min) * 0.1 if y_max != y_min else 10
 
-        # 畫損益平衡垂直線
         ax.axvline(month, color='green', linestyle='--', linewidth=1.5, label='Breakeven')
 
-        # 顯示標註文字 (包含月份與對應數據)
         info_text = f"Month: {month}\n{label}: {int(val):,}"
 
         ax.text(
             month, val + offset, info_text, color='green', fontsize=10, ha='center',
             bbox=dict(boxstyle="round,pad=0.3", edgecolor='blue', facecolor="white")
+        )
+    else:
+        ax.text(
+            0.95, 0.95, 'No Breakeven Point in this scenario',
+            transform=ax.transAxes, fontsize=12, color='red', ha='right', va='top',
+            bbox=dict(boxstyle="round,pad=0.3", edgecolor='red', facecolor="white")
         )
 
 def plot_scenario(
@@ -138,9 +144,21 @@ def plot_scenario(
     subscription_revenue, ad_revenue, monthly_revenue = calculate_revenues(
         mau_data, months_total, subscription_rate, monthly_subscription_price, annual_subscription_price, rpm
     )
-    cash_flow, cumulative_surplus, breakeven_month = calculate_cash_flow(monthly_revenue, months_total, personnel_cost_low, personnel_cost_high, operational_cost)
-    growth_rates = [(initial_growth_rate - (initial_growth_rate - final_growth_rate) * (month / (months_total - 1))) for month in range(months_total)]
+    cash_flow, cumulative_surplus, breakeven_month = calculate_cash_flow(
+        monthly_revenue, months_total, personnel_cost_low, personnel_cost_high, operational_cost
+    )
+
+    # 計算成長率（同一公式）
+    growth_rates = []
+    for month in range(months_total):
+        if month < 2:
+            g = 0
+        else:
+            ratio = (month - 2) / (months_total - 3)
+            g = initial_growth_rate * ((final_growth_rate / initial_growth_rate) ** (ratio**2))
+        growth_rates.append(g)
     growth_rates_percent = [rate * 100 for rate in growth_rates]
+
     cash_balance = [initial_capital + cs for cs in cumulative_surplus]
     total_revenue = [sr + ar for sr, ar in zip(subscription_revenue, ad_revenue)]
 
@@ -199,14 +217,14 @@ def plot_scenario(
     ax3.grid(linestyle='--', alpha=0.7)
     save_individual_fig(fig3, f"{scenario_name.lower()}_monthly_revenue_over_time.png")
 
-    # 圖4：每月現金流 (顯示Breakeven當月收入)
+    # 圖4：每月現金流
     fig4, ax4 = plt.subplots(figsize=(10, 8))
     ax4.plot(range(1, months_total + 1), cash_flow, marker='o', linewidth=2.5, color='#673AB7', label='Monthly Cash Flow')
     annotate_highlight_points(ax4, range(1, months_total + 1), cash_flow, highlight_months)
     if breakeven_month:
         annotate_breakeven(ax4, breakeven_month, 'cash_flow', {
             'month': breakeven_month,
-            'value': monthly_revenue[idx],  
+            'value': monthly_revenue[idx],
             'label': 'Monthly Revenue'
         })
     ax4.axhline(0, color='gray', linestyle='--', linewidth=1)
@@ -217,7 +235,7 @@ def plot_scenario(
     ax4.legend()
     save_individual_fig(fig4, f"{scenario_name.lower()}_monthly_cash_flow.png")
 
-    # 圖5：成長率遞減
+    # 圖5：成長率遞減 (凸性指數型)
     fig5, ax5 = plt.subplots(figsize=(10, 8))
     ax5.plot(range(1, months_total + 1), growth_rates_percent, marker='o', linewidth=2.5, color='#FFA726')
     annotate_highlight_points(ax5, range(1, months_total + 1), growth_rates_percent, highlight_months)
@@ -251,13 +269,16 @@ def plot_scenario(
     ax6.legend()
     save_individual_fig(fig6, f"{scenario_name.lower()}_cash_balance.png")
 
+    # 回傳資訊
     return {
         'initial_growth_rate': initial_growth_rate,
         'final_growth_rate': final_growth_rate,
         'monthly_subscription_price': monthly_subscription_price,
         'annual_subscription_price': annual_subscription_price,
         'subscription_rate': subscription_rate,
-        'rpm': rpm
+        'rpm': rpm,
+        'breakeven_month': breakeven_month,
+        'final_cumulative_surplus': cumulative_surplus[-1] if cumulative_surplus else 0
     }
 
 def plot_and_save_individual_figs():
@@ -294,16 +315,16 @@ def plot_and_save_individual_figs():
     }
 
     # 繪製樂觀（Baseline）情境
-    baseline_assumptions = plot_scenario("Baseline", **baseline_params)
+    baseline_results = plot_scenario("Baseline", **baseline_params)
 
     # 繪製悲觀（Conservative）情境
-    conservative_assumptions = plot_scenario("Conservative", **conservative_params)
+    conservative_results = plot_scenario("Conservative", **conservative_params)
 
-    # 新增比較圖表：顯示原始與保守假設因子變化
+    # 新增比較圖表
     fig, ax = plt.subplots(figsize=(10, 8))
-    factors = list(baseline_assumptions.keys())
-    baseline_values = [baseline_assumptions[f] for f in factors]
-    conservative_values = [conservative_assumptions[f] for f in factors]
+    factors = ['initial_growth_rate', 'final_growth_rate', 'monthly_subscription_price', 'annual_subscription_price', 'subscription_rate', 'rpm']
+    baseline_values = [baseline_results[f] for f in factors]
+    conservative_values = [conservative_results[f] for f in factors]
 
     x = range(len(factors))
     width = 0.4
@@ -318,16 +339,30 @@ def plot_and_save_individual_figs():
     ax.grid(linestyle='--', alpha=0.7)
 
     explanation_text = (
-        "This chart compares the key assumptions between Baseline (more optimistic) and Conservative (more pessimistic) scenarios.\n"
-        "- initial_growth_rate/final_growth_rate: User growth rates start high and decrease over time.\n"
-        "- monthly_subscription_price/annual_subscription_price: Pricing for users who subscribe.\n"
-        "- subscription_rate: The fraction of users who subscribe.\n"
-        "- rpm: Revenue per thousand non-subscriber users from ads.\n"
-        "In the Conservative scenario, these values are lower, reflecting a more pessimistic outlook."
+        "This chart compares key assumptions between Baseline and Conservative scenarios.\n"
+        "- Growth rates now start high in the 3rd month and exponentially decrease until the final month.\n"
+        "In the Conservative scenario, growth rates and other factors are lower, reflecting a more pessimistic outlook."
     )
 
     fig.text(0.5, -0.2, explanation_text, ha='center', va='center', wrap=True, fontsize=10)
     save_individual_fig(fig, "assumption_comparison.png")
+
+    # 在stdout輸出財務摘要
+    print("\n==================== 財務摘要 ====================")
+    print("Baseline Scenario:")
+    if baseline_results['breakeven_month']:
+        print(f"  有損益平衡點，於第 {baseline_results['breakeven_month']} 月達成。")
+    else:
+        print("  無法在預設期間內達到損益平衡。")
+    print(f"  最終累積餘額: {int(baseline_results['final_cumulative_surplus']):,} TWD")
+
+    print("\nConservative Scenario:")
+    if conservative_results['breakeven_month']:
+        print(f"  有損益平衡點，於第 {conservative_results['breakeven_month']} 月達成。")
+    else:
+        print("  無法在預設期間內達到損益平衡。")
+    print(f"  最終累積餘額: {int(conservative_results['final_cumulative_surplus']):,} TWD")
+    print("================================================")
 
 # 執行主程式
 if __name__ == "__main__":
